@@ -84,6 +84,9 @@ struct thread
     int priority;                       /* Priority. */
     struct list_elem allelem;           /* List element for all threads list. */
     int64_t sleep_tick;                 /* The number of ticks during sleep. */
+    struct lock *blocked_by_lock;
+    int priority_original;              /* Keep track of a thread's priority before a donation */
+    struct list locks;                  /* All locks a thread holds */
 
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
@@ -134,5 +137,6 @@ int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
 void thread_sleep (int64_t);
 void thread_wakeup (int64_t);
+void thread_donation_priority (struct thread *cur, int new_priority);
 
 #endif /* threads/thread.h */
