@@ -1,5 +1,5 @@
 #! /bin/sh
-
+PINTOS_DIR="/home/nam97/workspace/pintos-os"
 # Path to GDB macros file.  Customize for your site.
 GDBMACROS=$PINTOS_DIR/src/misc/gdb-macros
 
