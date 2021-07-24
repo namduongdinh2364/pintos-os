@@ -36,6 +36,7 @@
 
 static bool cmp_priority (struct list_elem *one, struct list_elem *two, void *aux UNUSED);
 static bool cmp_priority_locks (struct list_elem *one, struct list_elem *two, void *aux UNUSED);
+static bool cmp_priority_sema (struct list_elem *one, struct list_elem *two, void *aux UNUSED);
 
 /* Initializes semaphore SEMA to VALUE.  A semaphore is a
    nonnegative integer along with two atomic operators for
@@ -129,11 +130,15 @@ sema_up (struct semaphore *sema)
 
   /* preempt */
   intr_set_level (old_level);
-
-  if (next != NULL && next->priority > cur->priority)
+  if(thread_mlfqs)
+    thread_yield ();
+  else
+  {
+    if (next != NULL && next->priority > cur->priority)
     {
-      thread_yield ();
+        thread_yield ();
     }
+  }
 }
 
 static void sema_test_helper (void *sema_);
@@ -345,6 +350,7 @@ struct semaphore_elem
   {
     struct list_elem elem;              /* List element. */
     struct semaphore semaphore;         /* This semaphore. */
+    int priority_sema;
   };
 
 /* Initializes condition variable COND.  A condition variable
@@ -389,7 +395,8 @@ cond_wait (struct condition *cond, struct lock *lock)
   ASSERT (lock_held_by_current_thread (lock));
   
   sema_init (&waiter.semaphore, 0);
-  list_push_back (&cond->waiters, &waiter.elem);
+  waiter.priority_sema = thread_current()->priority;
+  list_insert_ordered (&cond->waiters, &waiter.elem, cmp_priority_sema, NULL);
   lock_release (lock);
   sema_down (&waiter.semaphore);
   lock_acquire (lock);
@@ -411,6 +418,7 @@ cond_signal (struct condition *cond, struct lock *lock UNUSED)
   ASSERT (lock_held_by_current_thread (lock));
 
   if (!list_empty (&cond->waiters)) 
+  	list_sort(&cond->waiters, cmp_priority, NULL);
     sema_up (&list_entry (list_pop_front (&cond->waiters),
                           struct semaphore_elem, elem)->semaphore);
 }
@@ -447,4 +455,13 @@ cmp_priority_locks (struct list_elem *one, struct list_elem *two, void *aux UNUS
   const struct lock *slock = list_entry (two, struct lock, elem);
 
   return flock->priority >= slock->priority;
+}
+
+static bool
+cmp_priority_sema (struct list_elem *one, struct list_elem *two, void *aux UNUSED)
+{
+  const struct semaphore_elem *fconvar = list_entry (one, struct semaphore_elem, elem);
+  const struct semaphore_elem *sconvar = list_entry (two, struct semaphore_elem, elem);
+
+  return fconvar->priority_sema > sconvar->priority_sema;
 }

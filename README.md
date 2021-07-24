@@ -4,11 +4,6 @@ Clone init source code from [REPO](https://github.com/WyldeCat/pintos-anon)
 ```
 branch project1
 ```
-##### - pintos-project 2
-```
-branch project2
-```
-##### - pintos-project 3
-```
-branch project3
-```
+![](DESIGNDOC/project1.png)
+
+### Test pass 27/27

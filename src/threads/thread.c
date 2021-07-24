@@ -20,6 +20,8 @@
    of thread.h for details. */
 #define THREAD_MAGIC 0xcd6abf4b
 
+int load_avg;
+
 /* List of processes in THREAD_READY state, that is, processes
    that are ready to run but not actually running. */
 static struct list ready_list;
@@ -75,6 +77,9 @@ void thread_schedule_tail (struct thread *prev);
 static tid_t allocate_tid (void);
 static bool cmp_time (struct list_elem *one, struct list_elem *two, void *aux UNUSED);
 static bool cmp_priority (struct list_elem *one, struct list_elem *two, void *aux UNUSED);
+void mlfqs_update_priority (struct thread *);
+void mlfqs_inc_recent_cpu (void);
+void mlfqs_update_load_avg_and_recent_cpu (void);
 
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
@@ -108,6 +113,8 @@ thread_init (void)
 void
 thread_start (void) 
 {
+  load_avg = FP_CVI2F(0);
+
   /* Create the idle thread. */
   struct semaphore idle_started;
   sema_init (&idle_started, 0);
@@ -347,6 +354,8 @@ thread_foreach (thread_action_func *func, void *aux)
 void
 thread_set_priority (int new_priority) 
 {
+  if (thread_mlfqs)
+    return;
   enum intr_level old_level;
   struct thread *cur;
 
@@ -390,6 +399,10 @@ void
 thread_set_nice (int nice UNUSED) 
 {
   /* Not yet implemented. */
+  struct thread *cur = thread_current ();
+  cur->nice = nice;
+  mlfqs_update_priority (cur);
+  thread_yield ();
 }
 
 /* Returns the current thread's nice value. */
@@ -397,7 +410,7 @@ int
 thread_get_nice (void) 
 {
   /* Not yet implemented. */
-  return 0;
+    return thread_current ()->nice;
 }
 
 /* Returns 100 times the system load average. */
@@ -405,7 +418,7 @@ int
 thread_get_load_avg (void) 
 {
   /* Not yet implemented. */
-  return 0;
+  return FP_CVF2I_ROUND(FP_MULT_MIX (load_avg, 100));
 }
 
 /* Returns 100 times the current thread's recent_cpu value. */
@@ -413,7 +426,7 @@ int
 thread_get_recent_cpu (void) 
 {
   /* Not yet implemented. */
-  return 0;
+  return FP_CVF2I_ROUND(FP_MULT_MIX (thread_current()->recent_cpu, 100));
 }
 
 /* Idle thread.  Executes when no other thread is ready to run.
@@ -502,6 +515,9 @@ init_thread (struct thread *t, const char *name, int priority)
   t->priority_original = priority;
   list_init (&t->locks);
   t->blocked_by_lock = NULL;
+  t->nice = 0;
+  t->recent_cpu = FP_CVI2F(0);
+
   t->magic = THREAD_MAGIC;
 
   old_level = intr_disable ();
@@ -701,4 +717,68 @@ thread_donation_priority (struct thread *cur, int new_priority)
   }
 
   intr_set_level (old_level);
+}
+
+void 
+mlfqs_update_priority(struct thread *t)
+{
+  ASSERT(thread_mlfqs);
+
+  if (t == idle_thread)
+    return;
+
+  int a, b, c;
+
+  /* Convert param to fixed-point */ 
+  a = FP_CVI2F(PRI_MAX);
+  b = FP_DIV_MIX(t->recent_cpu, 4);
+  c = t->nice * 2;
+  t->priority = FP_CVF2I (FP_SUB_MIX (FP_SUB (a, b), c));
+
+  if (t->priority < PRI_MIN)
+    t->priority = PRI_MIN;
+  else if (t->priority > PRI_MAX)
+    t->priority = PRI_MAX;
+}
+
+void 
+mlfqs_inc_recent_cpu(void)
+{
+  ASSERT(thread_mlfqs);
+  ASSERT(intr_context());
+
+  struct thread *cur = thread_current();
+  if (cur == idle_thread)
+    return;
+
+  cur->recent_cpu = FP_ADD_MIX(cur->recent_cpu, 1);
+}
+
+void 
+mlfqs_update_load_avg_and_recent_cpu(void)
+{
+  ASSERT(thread_mlfqs);
+  ASSERT(intr_context());
+
+  size_t ready_cnt = list_size(&ready_list);
+
+  if (thread_current() != idle_thread)
+    ready_cnt++;
+
+  load_avg = FP_ADD (FP_DIV_MIX (FP_MULT_MIX(load_avg, 59), 60), FP_DIV_MIX(FP_CVI2F(ready_cnt), 60));
+  
+  /* Update for recent_cpu */
+  struct thread *t;
+  struct list_elem *e;
+
+  for (e = list_begin(&all_list); e != list_end(&all_list); e = list_next(e))
+  {
+    t = list_entry(e, struct thread, allelem);
+    if (t != idle_thread)
+    {
+      t->recent_cpu = FP_ADD_MIX (FP_MULT (FP_DIV (FP_MULT_MIX(load_avg, 2), \ 
+					  FP_ADD_MIX (FP_MULT_MIX (load_avg, 2), 1)), t->recent_cpu), t->nice);
+	    mlfqs_update_priority(t);
+  	}
+  }
 }
