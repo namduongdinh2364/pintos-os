@@ -1,6 +1,6 @@
 #!/bin/bash
 
-rm filesys.dsk
+#rm filesys.dsk
 
 echo "Copy echo ELF to filesys.dsk"
 pintos-mkdisk filesys.dsk --filesys-size=2

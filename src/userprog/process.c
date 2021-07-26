@@ -257,6 +257,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
   int i;
   char *save_ptr, *fn_cp;
 
+  acquire_lock_filesys();
   /* Allocate and activate page directory. */
   t->pagedir = pagedir_create ();
   if (t->pagedir == NULL)
@@ -359,6 +360,8 @@ load (const char *file_name, void (**eip) (void), void **esp)
  done:
   /* We arrive here whether the load is successful or not. */
   file_close (file);
+  release_lock_filesys();
+
   return success;
 }
 

@@ -25,15 +25,18 @@ syscall_handler (struct intr_frame *f UNUSED)
     switch (system_call)
     {
         case SYS_HALT:
-        shutdown_power_off();
+            shutdown_power_off();
         break;
 
         case SYS_EXIT:
-        check_addr(p + 1);
-        exit_proc(*(p + 1));
+            check_addr(p + 1);
+            exit_proc(*(p + 1));
         break;
 
         case SYS_EXEC:
+            check_addr(p + 1);
+            check_addr(*(p + 1));   		/* Check addr of argv */
+            f->eax = exec_proc(*(p + 1));
         break;
 
         case SYS_WAIT:
@@ -55,24 +58,31 @@ syscall_handler (struct intr_frame *f UNUSED)
         break;
 
         case SYS_WRITE:
+            check_addr(p + 3);
+            check_addr(*(p + 2));
+            if(*(p + 1) == 1)
+            {
+                putbuf(*(p + 2),*(p + 3));	/* put buffer and size to func putbuf */
+                f->eax = *(p + 3);			/* Return size of buffer */
+            }
         break;
 
         case SYS_SEEK:
         break;
 
         default:
-        printf("Default %d\n", *p);
+            printf("Default %d\n", *p);
     }
 }
 
-void exit_proc(int status)
+void exit_proc (int status)
 {
     thread_current()->exit_error = status;
 
     thread_exit();
 }
 
-void* check_addr(const void *vaddr)
+void* check_addr (const void *vaddr)
 {
     if (!is_user_vaddr(vaddr))
     {
@@ -86,4 +96,9 @@ void* check_addr(const void *vaddr)
         exit_proc(-1);
     }
 
+}
+
+int exec_proc (char *file_name)
+{
+    return process_execute (file_name);
 }
