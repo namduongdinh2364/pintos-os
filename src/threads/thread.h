@@ -96,10 +96,14 @@ struct thread
     struct list_elem elem;              /* List element. */
 
     bool success;
+    int fd_index;
     int exit_error;
+    int wait_tid;                      /* Waiting for thread id */
     struct list child_proc;
+    struct list files;                 /* List files open */
     struct thread* parent;
     struct semaphore child_lock;
+    struct file *self_exe;                 /* Keep struct file executable of itself */
 
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
@@ -112,6 +116,7 @@ struct thread
 
 struct child {
    int tid;
+   bool action;
    struct list_elem elem;
    int exit_error;
   };

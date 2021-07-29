@@ -123,6 +123,12 @@ process_wait (tid_t child_tid UNUSED)
   if(!p_child)
     return -1;
 
+  if(p_child->action)
+  {
+    thread_current()->wait_tid = p_child->tid;
+    sema_down(&thread_current()->child_lock);
+  } 
+
   int err = p_child->exit_error;
   list_remove(&p_child->elem);
 
@@ -137,7 +143,14 @@ process_exit (void)
   uint32_t *pd;
   int exit_code = cur->exit_error;
 
+  // if(cur->exit_error == -100)
+  //   exit_proc(-1);
+
   printf("%s: exit(%d)\n", cur->name, exit_code);
+  acquire_lock_filesys();
+  file_close(thread_current()->self_exe);
+  close_all_files(&thread_current()->files);
+  release_lock_filesys();
 
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
@@ -356,10 +369,12 @@ load (const char *file_name, void (**eip) (void), void **esp)
   /* Start address. */
   *eip = (void (*) (void)) ehdr.e_entry;
   success = true;
+  /* Prevents write to a process's executable */
+  file_deny_write(file);
+  thread_current()->self_exe = file;
 
  done:
   /* We arrive here whether the load is successful or not. */
-  file_close (file);
   release_lock_filesys();
 
   return success;

@@ -187,6 +187,7 @@ thread_create (const char *name, int priority,
   tid = t->tid = allocate_tid ();
   struct child* c = malloc(sizeof(*c));
   c->tid = tid;
+  c->action = true;
   c->exit_error = t->exit_error;
   list_push_back (&running_thread()->child_proc, &c->elem);
 
@@ -472,9 +473,13 @@ init_thread (struct thread *t, const char *name, int priority)
   t->priority = priority;
   t->magic = THREAD_MAGIC;
   t->exit_error = -100;
+  t->wait_tid = 0;
   t->parent = running_thread();
+  t->fd_index = 2;
+  t->self_exe = NULL;
   list_init (&t->child_proc);
-  sema_init(&t->child_lock, 0);
+  list_init (&t->files);
+  sema_init (&t->child_lock, 0);
 
   list_push_back (&all_list, &t->allelem);
 }
