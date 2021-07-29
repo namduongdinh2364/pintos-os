@@ -14,7 +14,7 @@ struct proc_file {
 	struct list_elem elem;
 };
 
-void* check_addr(const void*);
+void check_vali_add(const void*);
 
 void
 syscall_init (void) 
@@ -25,54 +25,54 @@ syscall_init (void)
 static void
 syscall_handler (struct intr_frame *f UNUSED) 
 {
-    int *p = f->esp;
+    int *esp = f->esp;
 
-    check_addr(p);
+    check_vali_add(esp);
 
-    int system_call = *p;
+    int system_call = *esp;
     switch (system_call)
     {
         case SYS_HALT:
             shutdown_power_off();
-        break;
+            break;
 
         case SYS_EXIT:
-            check_addr(p + 1);
-            exit_proc(*(p + 1));
-        break;
+            check_vali_add(esp + 1);
+            exit_proc(*(esp + 1));
+            break;
 
         case SYS_EXEC:
-            check_addr(p + 1);
-            check_addr(*(p + 1));
-            f->eax = exec_proc(*(p + 1));
-        break;
+            check_vali_add(esp + 1);
+            check_vali_add(*(esp + 1));
+            f->eax = exec_proc(*(esp + 1));
+            break;
 
         case SYS_WAIT:
-            check_addr(p + 1);
-		    f->eax = process_wait(*(p + 1));
-        break;
+            check_vali_add(esp + 1);
+		    f->eax = process_wait(*(esp + 1));
+            break;
 
         case SYS_CREATE:
-            check_addr(p+2);
-            check_addr(*(p+1));
+            check_vali_add(esp+2);
+            check_vali_add(*(esp+1));
             acquire_lock_filesys();
-            f->eax = filesys_create(*(p+1),*(p+2));
+            f->eax = filesys_create(*(esp+1),*(esp+2));
             release_lock_filesys();
-        break;
+            break;
 
         case SYS_REMOVE:
-            check_addr(p+1);
-            check_addr(*(p+1));
+            check_vali_add(esp+1);
+            check_vali_add(*(esp+1));
             acquire_lock_filesys();
-            f->eax = filesys_remove(*(p+1));
+            f->eax = filesys_remove(*(esp+1));
             release_lock_filesys();
-        break;
+            break;
 
         case SYS_OPEN:
-            check_addr(p+1);
-            check_addr(*(p+1));
+            check_vali_add(esp+1);
+            check_vali_add(*(esp+1));
             acquire_lock_filesys();
-            struct file* fptr = filesys_open (*(p+1));
+            struct file* fptr = filesys_open (*(esp+1));
             release_lock_filesys();
 
             if(fptr==NULL)
@@ -86,30 +86,30 @@ syscall_handler (struct intr_frame *f UNUSED)
                 list_push_back (&thread_current()->files, &pfile->elem);
                 f->eax = pfile->fd;
             }
-        break;
+            break;
 
         case SYS_FILESIZE:
-            check_addr (p+1);
+            check_vali_add (esp+1);
             acquire_lock_filesys ();
-            f->eax = file_length (scan_file(&thread_current()->files, *(p+1))->ptr);
+            f->eax = file_length (scan_file(&thread_current()->files, *(esp+1))->ptr);
             release_lock_filesys ();
-        break;
+            break;
 
         case SYS_READ:
-            check_addr(p + 3);
-            check_addr(*(p + 2));
+            check_vali_add(esp + 3);
+            check_vali_add(*(esp + 2));
 
-            if(*(p + 1) == 0)
+            if(*(esp + 1) == 0)
             {
                 int i;
-                uint8_t* buffer = *(p + 2);
-                for(i = 0; i < *(p + 3); i++)
+                uint8_t* buffer = *(esp + 2);
+                for(i = 0; i < *(esp + 3); i++)
                     buffer[i] = input_getc();
-                f->eax = *(p + 3);
+                f->eax = *(esp + 3);
             }
             else
             {
-                struct proc_file* fptr = scan_file(&thread_current()->files, *(p + 1));
+                struct proc_file* fptr = scan_file(&thread_current()->files, *(esp + 1));
                 if(fptr == NULL)
                 {
                     f->eax = -1;
@@ -117,25 +117,25 @@ syscall_handler (struct intr_frame *f UNUSED)
                 else
                 {
                     acquire_lock_filesys();
-                    f->eax = file_read (fptr->ptr, *(p+2), *(p + 3));
+                    f->eax = file_read (fptr->ptr, *(esp+2), *(esp + 3));
                     release_lock_filesys();
                 }
             }
-        break;
+            break;
 
         case SYS_WRITE:
-            check_addr (p + 3);
-            check_addr (*(p + 2));
+            check_vali_add (esp + 3);
+            check_vali_add (*(esp + 2));
 
-            if(*(p + 1) == 1)   /* Write to stdout */
+            if(*(esp + 1) == 1)   /* Write to stdout */
             {
-                if(*(p + 3) != 0)
-                    putbuf(*(p + 2),*(p + 3));	/* put buffer and size to func putbuf */
-                f->eax = *(p + 3);			    /* Return size of buffer */
+                if(*(esp + 3) != 0)
+                    putbuf(*(esp + 2),*(esp + 3));	/* put buffer and size to func putbuf */
+                f->eax = *(esp + 3);			    /* Return size of buffer */
             }
             else
             {
-                struct proc_file* fptr = scan_file (&thread_current()->files, *(p + 1));
+                struct proc_file* fptr = scan_file (&thread_current()->files, *(esp + 1));
                 if(fptr == NULL)
                 {
                     f->eax = -1;
@@ -143,37 +143,38 @@ syscall_handler (struct intr_frame *f UNUSED)
                 else
                 {
                     acquire_lock_filesys ();
-                    f->eax = file_write (fptr->ptr, *(p + 2), *(p + 3));
+                    f->eax = file_write (fptr->ptr, *(esp + 2), *(esp + 3));
                     release_lock_filesys ();
                 }
             }
-        break;
+            break;
 
         case SYS_SEEK:
-            check_addr( p+ 2);
+            check_vali_add(esp+ 2);
 
             acquire_lock_filesys ();
-            file_seek (scan_file(&thread_current()->files, *(p + 1))->ptr, *(p + 2));
+            file_seek (scan_file(&thread_current()->files, *(esp + 1))->ptr, *(esp + 2));
             release_lock_filesys ();
-        break;
+            break;
 
 		case SYS_TELL:
-            check_addr(p+1);
+            check_vali_add(esp+1);
 
             acquire_lock_filesys();
-            f->eax = file_tell(scan_file(&thread_current()->files, *(p + 1))->ptr);
+            f->eax = file_tell(scan_file(&thread_current()->files, *(esp + 1))->ptr);
             release_lock_filesys();
-		break;
+		    break;
 
 		case SYS_CLOSE:
-            check_addr (p+1);
+            check_vali_add (esp+1);
             acquire_lock_filesys ();
-            close_file (&thread_current()->files,*(p+1));
+            close_file (&thread_current()->files,*(esp+1));
             release_lock_filesys ();
-		break;
+		    break;
 
         default:
-            printf("Default %d\n", *p);
+            exit_proc(-1);
+            break;
     }
 }
 
@@ -198,18 +199,23 @@ void exit_proc (int status)
     thread_exit();
 }
 
-void* check_addr (const void *vaddr)
+void check_vali_add (const void *vaddr)
 {
-    if (!is_user_vaddr(vaddr))
+    int i;
+    char *esp = (char *)vaddr;
+    for(i=0; i< 4; i++)
     {
-        exit_proc(-1);
-    }
+        if (!is_user_vaddr(esp + i))
+        {
+            exit_proc(-1);
+        }
 
-    /* Verify that the user-addr is mapped to kernel-addr */ 
-    void *ptr = pagedir_get_page(thread_current()->pagedir, vaddr);
-    if (!ptr)
-    {
-        exit_proc(-1);
+        /* Verify that the user-addr is mapped to kernel-addr */ 
+        void *check  = pagedir_get_page(thread_current()->pagedir, esp + i);
+        if (check == NULL)
+        {
+            exit_proc(-1);
+        }
     }
 }
 
@@ -280,3 +286,4 @@ struct proc_file* scan_file(struct list* files, int fd)
 
     return NULL;
 }
+

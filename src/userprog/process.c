@@ -143,8 +143,8 @@ process_exit (void)
   uint32_t *pd;
   int exit_code = cur->exit_error;
 
-  // if(cur->exit_error == -100)
-  //   exit_proc(-1);
+  if(cur->exit_error == -100)
+    exit_proc(-1);
 
   printf("%s: exit(%d)\n", cur->name, exit_code);
   acquire_lock_filesys();
