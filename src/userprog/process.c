@@ -30,6 +30,7 @@ process_execute (const char *file_name)
 {
   char *fn_copy;
   char *save_ptr;
+  char *f_name;
   tid_t tid;
   
   /* Make a copy of FILE_NAME.
@@ -39,10 +40,11 @@ process_execute (const char *file_name)
     return TID_ERROR;
 
   strlcpy (fn_copy, file_name, PGSIZE);
-  file_name = strtok_r (file_name," ",&save_ptr);
-
+  f_name = malloc(strlen(file_name)+1);
+  strlcpy (f_name, file_name, strlen(file_name) + 1);
+  f_name = strtok_r (f_name," ",&save_ptr);
   /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
+  tid = thread_create (f_name, PRI_DEFAULT, start_process, fn_copy);
 
   if (tid == TID_ERROR)
     palloc_free_page (fn_copy);
@@ -142,9 +144,6 @@ process_exit (void)
   struct thread *cur = thread_current ();
   uint32_t *pd;
   int exit_code = cur->exit_error;
-
-  if(cur->exit_error == -100)
-    exit_proc(-1);
 
   printf("%s: exit(%d)\n", cur->name, exit_code);
   acquire_lock_filesys();

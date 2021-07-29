@@ -7,8 +7,8 @@
 // #include "list.h"
 
 static void syscall_handler (struct intr_frame *);
-struct proc_file* scan_file(struct list* files, int fd);
-struct proc_file {
+struct file_descriptor* scan_file(struct list* files, int fd);
+struct file_descriptor {
 	struct file* ptr;
 	int fd;
 	struct list_elem elem;
@@ -79,7 +79,7 @@ syscall_handler (struct intr_frame *f UNUSED)
                 f->eax = -1;
             else
             {
-                struct proc_file *pfile = malloc(sizeof(*pfile));
+                struct file_descriptor *pfile = malloc(sizeof(*pfile));
                 pfile->ptr = fptr;
                 pfile->fd = thread_current()->fd_index;
                 thread_current()->fd_index++;
@@ -109,7 +109,7 @@ syscall_handler (struct intr_frame *f UNUSED)
             }
             else
             {
-                struct proc_file* fptr = scan_file(&thread_current()->files, *(esp + 1));
+                struct file_descriptor* fptr = scan_file(&thread_current()->files, *(esp + 1));
                 if(fptr == NULL)
                 {
                     f->eax = -1;
@@ -135,7 +135,7 @@ syscall_handler (struct intr_frame *f UNUSED)
             }
             else
             {
-                struct proc_file* fptr = scan_file (&thread_current()->files, *(esp + 1));
+                struct file_descriptor* fptr = scan_file (&thread_current()->files, *(esp + 1));
                 if(fptr == NULL)
                 {
                     f->eax = -1;
@@ -224,7 +224,6 @@ int exec_proc (char *file_name)
     acquire_lock_filesys();
     char * fn_cp = malloc (strlen(file_name)+1);
     strlcpy(fn_cp, file_name, strlen(file_name)+1);
-
     char * save_ptr;
     fn_cp = strtok_r(fn_cp," ",&save_ptr);
 
@@ -242,21 +241,17 @@ int exec_proc (char *file_name)
 void close_file(struct list* files, int fd)
 {
     struct list_elem *e;
-    struct proc_file *f;
 
     for (e = list_begin (files); e != list_end (files); e = list_next (e))
     {
-        f = list_entry (e, struct proc_file, elem);
+        struct file_descriptor *f = list_entry (e, struct file_descriptor, elem);
         if(f->fd == fd)
         {
             file_close (f->ptr);
             list_remove (e);
+            free(f);
+            break;
         }
-    }
-    free(f);
-    if(fd == 1 || fd == 0)
-    {
-        exit_proc(-1);
     }
 }
 
@@ -266,20 +261,20 @@ void close_all_files(struct list* files)
     while(!list_empty(files))
     {
         e = list_pop_front(files);
-        struct proc_file *f = list_entry (e, struct proc_file, elem); 
+        struct file_descriptor *f = list_entry (e, struct file_descriptor, elem); 
         file_close(f->ptr);
         list_remove(e);
         free(f);
     }  
 }
 
-struct proc_file* scan_file(struct list* files, int fd)
+struct file_descriptor* scan_file(struct list* files, int fd)
 {
 	struct list_elem *e;
 
       for (e = list_begin (files); e != list_end (files); e = list_next (e))
         {
-          struct proc_file *f = list_entry (e, struct proc_file, elem);
+          struct file_descriptor *f = list_entry (e, struct file_descriptor, elem);
           if(f->fd == fd)
           	return f;
         }
