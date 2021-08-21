@@ -362,14 +362,9 @@ thread_set_priority (int new_priority)
   cur = thread_current ();
 
   old_level = intr_disable ();
-  if(list_empty(&cur->locks))
+  if(list_empty(&cur->locks) || new_priority > cur->priority)
   {
     cur->priority = new_priority; 
-    cur->priority_original = new_priority;
-  }
-  else if(new_priority > cur->priority)
-  {
-    cur->priority = new_priority;
     cur->priority_original = new_priority;
   }
   else

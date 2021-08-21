@@ -240,6 +240,7 @@ lock_acquire (struct lock *lock)
       if (lock_next->priority < cur->priority)
       {
         lock_next->priority = cur->priority;
+        list_sort(&lock_holder->locks, cmp_priority_locks, NULL);
       }
       /* For nest donation:
        * find the next lock that locks the current lock_holder
@@ -321,6 +322,7 @@ lock_release (struct lock *lock)
         {
           struct lock *lock_first;
           lock_first = list_entry (list_front (&cur->locks), struct lock, elem);
+
           if (lock_first->priority != -1)
             {
               thread_donation_priority (cur, lock_first->priority);
@@ -454,7 +456,7 @@ cmp_priority_locks (struct list_elem *one, struct list_elem *two, void *aux UNUS
   const struct lock *flock = list_entry (one, struct lock, elem);
   const struct lock *slock = list_entry (two, struct lock, elem);
 
-  return flock->priority >= slock->priority;
+  return flock->priority > slock->priority;
 }
 
 static bool
