@@ -38,6 +38,10 @@
 #include "filesys/fsutil.h"
 #endif
 
+#include "vm/page.h"
+#include "vm/frame.h"
+#include "vm/swap.h"
+
 /* Page directory with kernel mappings only. */
 uint32_t *init_page_dir;
 
@@ -126,12 +130,16 @@ main (void)
   locate_block_devices ();
   filesys_init (format_filesys);
 #endif
-
+  vm_frame_table_init();
+  vm_swap_init();
   printf ("Boot complete.\n");
   
   /* Run actions specified on kernel command line. */
   run_actions (argv);
 
+  /* Free frame table and swap table */
+  vm_frame_table_destroy();
+  vm_swap_destroy();
   /* Finish up. */
   shutdown_power_off ();
   thread_exit ();

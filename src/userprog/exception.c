@@ -4,13 +4,27 @@
 #include "userprog/gdt.h"
 #include "threads/interrupt.h"
 #include "threads/thread.h"
+#include "threads/vaddr.h"
+#include "threads/palloc.h"
+#include "userprog/syscall.h"
+#include "userprog/pagedir.h"
+#include "vm/swap.h"
+#include "vm/frame.h" 
+#include "vm/page.h"
+#include <round.h>
+#include <stdbool.h>
 
 /* Number of page faults processed. */
 static long long page_fault_cnt;
 
+/* Page fault lock */
+#define STACK_LIMIT 1048576
+struct lock page_fault_lock;
+
 static void kill (struct intr_frame *);
 static void page_fault (struct intr_frame *);
-
+static void stack_grow(void *fesp, void *faddr);
+static bool install_page (void *upage, void *kpage, bool writable);
 /* Registers handlers for interrupts that can be caused by user
    programs.
 
@@ -29,6 +43,8 @@ static void page_fault (struct intr_frame *);
 void
 exception_init (void) 
 {
+  /* Initialise page fault lock. */
+  lock_init(&page_fault_lock);
   /* These exceptions can be raised explicitly by a user program,
      e.g. via the INT, INT3, INTO, and BOUND instructions.  Thus,
      we set DPL==3, meaning that user programs are allowed to
@@ -89,7 +105,7 @@ kill (struct intr_frame *f)
       printf ("%s: dying due to interrupt %#04x (%s).\n",
               thread_name (), f->vec_no, intr_name (f->vec_no));
       intr_dump_frame (f);
-      exit_proc(-1);
+      thread_exit ();
 
     case SEL_KCSEG:
       /* Kernel's code segment, which indicates a kernel bug.
@@ -122,6 +138,7 @@ kill (struct intr_frame *f)
 static void
 page_fault (struct intr_frame *f) 
 {
+  // printf("Enter page fault\n");
   bool not_present;  /* True: not-present page, false: writing r/o page. */
   bool write;        /* True: access was write, false: access was read. */
   bool user;         /* True: access by user, false: access by kernel. */
@@ -139,7 +156,8 @@ page_fault (struct intr_frame *f)
   /* Turn interrupts back on (they were only off so that we could
      be assured of reading CR2 before it changed). */
   intr_enable ();
-
+  /* Lock on */
+  acquire_lock_page_fault();
   /* Count page faults. */
   page_fault_cnt++;
 
@@ -148,14 +166,159 @@ page_fault (struct intr_frame *f)
   write = (f->error_code & PF_W) != 0;
   user = (f->error_code & PF_U) != 0;
 
-  /* To implement virtual memory, delete the rest of the function
-     body, and replace it with code that brings in the page to
-     which fault_addr refers. */
-  printf ("Page fault at %p: %s error %s page in %s context.\n",
+  struct thread *cur = thread_current();
+  void *upage = (void *) pg_round_down(fault_addr);
+  void *kpage;
+  struct sup_pg_table_entry *ste = vm_sup_pg_table_lookup(upage, cur);
+
+  /* Stack growth if necessary */
+  if( fault_addr < PHYS_BASE && fault_addr >= PHYS_BASE - STACK_LIMIT) {
+    if(user) {
+      if(fault_addr >= f->esp || f->esp-4== fault_addr || f->esp-32 == fault_addr) {
+        if(ste == NULL) {
+          /** stack over to page unallocated */
+          stack_grow(f->esp, fault_addr);
+          release_lock_page_fault();
+          return;
+        }
+      }
+    }
+    else {
+      void *esp = thread_current()->user_esp;
+      void *stack_boundary = thread_current()->stack_boundary;
+      if(fault_addr < stack_boundary) {
+        stack_grow(esp, fault_addr);
+        release_lock_page_fault();
+        return;
+      }
+    }
+  }
+
+  /** If page faults can be caused by user threads */
+  if(user) {
+    /* Check if invalid access- kernel or writing to r/o */
+    if( fault_addr == NULL || is_kernel_vaddr(fault_addr) || (write && !not_present) || ste == NULL) {
+      release_lock_page_fault();
+      exit_proc(-1);
+    }
+    page_location_Type location = ste->location;
+
+    switch(location) {
+      case ALL_ZERO:
+        release_lock_page_fault();
+        exit_proc(-1);
+        break;
+
+      case IN_SWAP:
+        kpage = palloc_get_page(PAL_USER|PAL_ZERO);
+        if(kpage == NULL){
+          vm_frame_table_evict_frame();
+          kpage = palloc_get_page(PAL_USER|PAL_ZERO);
+          ASSERT(kpage != NULL);
+        }
+        /* Copy data into frame */
+        vm_swap_in(kpage, ste->index);
+        /* Update tables */
+        pagedir_set_page(cur->pagedir, upage, kpage, ste->writeable);
+        if(ste->from_file) {
+          pagedir_set_dirty(cur->pagedir, upage, true);
+        }
+        vm_sup_pg_table_push_to_RAM(upage, cur);
+        vm_frame_table_set_frame(upage, cur->tid);
+        break;
+
+      case IN_FILESYS:
+        kpage = palloc_get_page(PAL_USER|PAL_ZERO);
+        if(kpage == NULL) {
+          vm_frame_table_evict_frame();
+          kpage = palloc_get_page(PAL_USER|PAL_ZERO);
+          ASSERT(kpage!=NULL);
+        }
+        /* Read data from file */
+        acquire_lock_filesys();
+        file_read_at(ste->file, kpage, ste->read, ste->offset);
+        release_lock_filesys();
+        memset(kpage+ste->read, 0, ste->zero);
+        /* Update tables */
+        vm_sup_pg_table_push_to_RAM(upage, cur);
+        pagedir_set_page(cur->pagedir, upage, kpage, ste->writeable);
+        vm_frame_table_set_frame(upage, cur->tid);
+
+        break;
+    }
+    release_lock_page_fault();
+
+    return;
+  }
+
+  /** If page faults cause kernel */
+  else{
+    release_lock_page_fault();
+
+    printf ("Page fault at %p: %s error %s page in %s context.\n",
           fault_addr,
           not_present ? "not present" : "rights violation",
           write ? "writing" : "reading",
           user ? "user" : "kernel");
-  kill (f);
+    kill (f);
+  }
 }
 
+static void stack_grow(void *fesp, void *faddr){
+  struct thread * cur = thread_current();
+  uint8_t * stack_boundary = cur->stack_boundary;
+
+  int page_distance = ROUND_UP (faddr - fesp, PGSIZE);
+  int new_page_cnt = page_distance / PGSIZE;
+
+  /* Stack limit- 8MB */
+  // for (int i = 1; i <= new_page_cnt; i++) {
+    if(cur->stack_size >= STACK_LIMIT) {
+      exit_proc(-1);
+    }
+
+    void * kpage = palloc_get_page (PAL_USER|PAL_ZERO);
+    if(kpage == NULL) {
+      vm_frame_table_evict_frame();
+      kpage = palloc_get_page(PAL_USER);
+      ASSERT(kpage!=NULL);
+    }
+
+    uint8_t * new_stack_boundary = stack_boundary - PGSIZE;
+    install_page(new_stack_boundary,kpage,true);
+    cur->stack_boundary = new_stack_boundary;
+    cur->stack_size += PGSIZE;
+  // }
+}
+
+static bool
+install_page (void *upage, void *kpage, bool writable)
+{
+  struct thread *t = thread_current ();
+
+  /* Verify that there's not already a page at that virtual
+     address, then map our page there. */
+  if (pagedir_get_page (t->pagedir, upage) == NULL
+      && pagedir_set_page (t->pagedir, upage, kpage, writable)) {
+    vm_frame_table_set_frame(upage, t->tid);
+    vm_sup_pg_table_set_page(upage, writable);
+    return true;
+  }
+
+  return false;
+}
+
+void acquire_lock_page_fault (void) 
+{
+  lock_acquire(&page_fault_lock);
+}
+
+void release_lock_page_fault (void) 
+{
+  lock_release(&page_fault_lock);
+}
+
+bool cur_thread_hold_lock_page_fault (void)
+{
+  return lock_held_by_current_thread (&page_fault_lock);
+}

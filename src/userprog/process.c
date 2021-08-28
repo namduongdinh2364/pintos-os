@@ -17,6 +17,7 @@
 #include "threads/palloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+#include "userprog/exception.h"
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
@@ -45,7 +46,8 @@ process_execute (const char *file_name)
   f_name = strtok_r (f_name," ",&save_ptr);
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create (f_name, PRI_DEFAULT, start_process, fn_copy);
-
+  /* free allocated memory pointed to by file_name */
+  free(f_name); 
   if (tid == TID_ERROR)
     palloc_free_page (fn_copy);
 
@@ -276,6 +278,9 @@ load (const char *file_name, void (**eip) (void), void **esp)
     goto done;
   process_activate ();
   
+  /* Allocate supplemental page table. */
+  t->sup_pg_table = vm_sup_pg_table_init();
+
   /* Open executable file. */
   fn_cp = malloc (strlen(file_name) + 1);
   strlcpy(fn_cp, file_name, strlen(file_name) + 1);
@@ -451,6 +456,7 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
   ASSERT (pg_ofs (upage) == 0);
   ASSERT (ofs % PGSIZE == 0);
 
+  acquire_lock_page_fault();
   file_seek (file, ofs);
   while (read_bytes > 0 || zero_bytes > 0) 
     {
@@ -460,31 +466,19 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
       size_t page_zero_bytes = PGSIZE - page_read_bytes;
 
-      /* Get a page of memory. */
-      uint8_t *kpage = palloc_get_page (PAL_USER);
-      if (kpage == NULL)
-        return false;
-
-      /* Load this page. */
-      if (file_read (file, kpage, page_read_bytes) != (int) page_read_bytes)
-        {
-          palloc_free_page (kpage);
-          return false; 
-        }
-      memset (kpage + page_read_bytes, 0, page_zero_bytes);
-
-      /* Add the page to the process's address space. */
-      if (!install_page (upage, kpage, writable)) 
-        {
-          palloc_free_page (kpage);
-          return false; 
-        }
+      /** Add inf into sup table */
+      vm_sup_pg_table_set_page(upage, writable);
+      file = file_reopen(file);
+      vm_sup_pg_table_push_to_FILE(upage, file, ofs, page_read_bytes, page_zero_bytes, thread_current());
+      ofs+= PGSIZE;
 
       /* Advance. */
       read_bytes -= page_read_bytes;
       zero_bytes -= page_zero_bytes;
       upage += PGSIZE;
     }
+
+  release_lock_page_fault();
   return true;
 }
 
@@ -495,17 +489,27 @@ setup_stack (void **esp, char * file_name)
 {
   uint8_t *kpage;
   bool success = false;
+  struct thread * cur = thread_current();
 
+  acquire_lock_page_fault();
   kpage = palloc_get_page (PAL_USER | PAL_ZERO);
-  if (kpage != NULL) 
-    {
-      success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
-      if (success)
-        *esp = PHYS_BASE;
-      else
-        palloc_free_page (kpage);
-    }
-
+  if(kpage == NULL)
+  {
+    vm_frame_table_evict_frame();
+    kpage = palloc_get_page(PAL_USER);
+    ASSERT(kpage != NULL);
+  }
+  else
+  {
+    success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
+    cur->stack_boundary = ((uint8_t *) PHYS_BASE) - PGSIZE;
+    cur->stack_size = 0;
+    if (success)
+      *esp = PHYS_BASE;
+    else
+      palloc_free_page (kpage);
+  }
+  release_lock_page_fault();
   /* Sort stack */
   char *token, *save_ptr;
   int *argv;
@@ -580,6 +584,13 @@ install_page (void *upage, void *kpage, bool writable)
 
   /* Verify that there's not already a page at that virtual
      address, then map our page there. */
-  return (pagedir_get_page (t->pagedir, upage) == NULL
-          && pagedir_set_page (t->pagedir, upage, kpage, writable));
+  if (pagedir_get_page (t->pagedir, upage) == NULL
+      && pagedir_set_page (t->pagedir, upage, kpage, writable))
+  {
+    vm_frame_table_set_frame(upage, t->tid);
+    vm_sup_pg_table_set_page(upage, writable);
+    return true;
+  }
+
+  return false;
 }

@@ -304,6 +304,17 @@ thread_exit (void)
      when it calls thread_schedule_tail(). */
   intr_disable ();
   list_remove (&thread_current()->allelem);
+    /* Free the list of mmap_page things. */
+  while(!list_empty(&thread_current()->mmap_page_list))
+  {
+    struct list_elem * e = list_pop_front(&thread_current()->mmap_page_list);
+    struct mmap_page * mp = list_entry(e, struct mmap_page, list_elem);
+    free(mp);
+  }
+
+  /* Free sup table */
+  vm_sup_pg_table_destroy(thread_current()->sup_pg_table);
+
   thread_current ()->status = THREAD_DYING;
   schedule ();
   NOT_REACHED ();
@@ -477,8 +488,10 @@ init_thread (struct thread *t, const char *name, int priority)
   t->parent = running_thread();
   t->fd_index = 2;
   t->self_exe = NULL;
+  t->map_id = 0;
   list_init (&t->child_proc);
   list_init (&t->files);
+  list_init (&t->mmap_page_list);
   sema_init (&t->child_lock, 0);
 
   list_push_back (&all_list, &t->allelem);

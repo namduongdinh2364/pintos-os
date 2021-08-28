@@ -1,9 +1,9 @@
 # pintos-os
 Clone init source code from [REPO](https://github.com/WyldeCat/pintos-anon)
-##### - pintos-project 2
+##### - pintos-project 3
 ```
-branch project2
+branch project3
 ```
-![](DESIGNDOC/project2.png)
+![](DESIGNDOC/project3.png)
 
-### Test pass 80/80
+### Test pass 113/113

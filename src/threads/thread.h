@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include <kernel/list.h>
 #include <threads/synch.h>
+#include "vm/page.h"
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -109,10 +110,29 @@ struct thread
     /* Owned by userprog/process.c. */
     uint32_t *pagedir;                  /* Page directory. */
 #endif
+   /**
+    * Virtual memory
+   */
+    struct sup_pg_table *sup_pg_table;
+    void *stack_boundary;
+    int stack_size;
+    void *user_esp;
+    int map_id;
+    struct list mmap_page_list;
 
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */
   };
+
+struct mmap_page{
+  void *upage;
+  int map_id;
+  struct file *file;
+  struct inode *inode;
+  int offset;
+
+  struct list_elem list_elem;
+};
 
 struct child {
    int tid;

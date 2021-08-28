@@ -5,9 +5,15 @@
 #include "threads/init.h"
 #include "threads/pte.h"
 #include "threads/palloc.h"
-
+#include "userprog/exception.h"
+#include "vm/frame.h"
+#include "vm/page.h"
+#include "vm/swap.h"
+#include "filesys/file.h"
+#include "userprog/syscall.h"
 static uint32_t *active_pd (void);
 static void invalidate_pagedir (uint32_t *);
+
 
 /* Creates a new page directory that has mappings for kernel
    virtual addresses, but none for user virtual addresses.
@@ -27,23 +33,66 @@ pagedir_create (void)
 void
 pagedir_destroy (uint32_t *pd) 
 {
+  struct thread * cur= thread_current();
   uint32_t *pde;
 
   if (pd == NULL)
     return;
 
   ASSERT (pd != init_page_dir);
-  for (pde = pd; pde < pd + pd_no (PHYS_BASE); pde++)
-    if (*pde & PTE_P) 
-      {
-        uint32_t *pt = pde_get_pt (*pde);
-        uint32_t *pte;
+  for (pde = pd; pde < pd + pd_no (PHYS_BASE); pde++) {
+    if (*pde & PTE_P) {
+      uint32_t *pt = pde_get_pt (*pde);
+      uint32_t *pte;
         
-        for (pte = pt; pte < pt + PGSIZE / sizeof *pte; pte++)
-          if (*pte & PTE_P) 
-            palloc_free_page (pte_get_page (*pte));
-        palloc_free_page (pt);
+      for (pte = pt; pte < pt + PGSIZE / sizeof *pte; pte++) {
+        /* Find out upage from pde and pte */
+        int pd_index = pde - pd;
+        int pt_index = pte - pt;
+        void * upage = (void *)( (pd_index<<22) | (pt_index<<12));
+        struct sup_pg_table_entry *ste = vm_sup_pg_table_lookup(upage, cur);
+        if (ste == NULL) {
+          continue;
+        }
+        
+        /* PTE valid */
+        if (*pte & PTE_P) {
+          void * kpage = pte_get_page(*pte);
+          /* if dirty and from file must write to file. */
+          if(pagedir_is_dirty(pd, upage) && ste->from_file) {
+            acquire_lock_filesys();
+            file_write_at(ste->file, kpage, PGSIZE, ste->offset);
+            release_lock_filesys();
+
+            palloc_free_page(kpage);
+            vm_frame_table_delete_entry(upage, thread_current()->tid);
+          }
+          else {
+            palloc_free_page (kpage);
+            vm_frame_table_delete_entry(upage, thread_current()->tid);
+          }
+        }
+        /* PTE not existing */
+        else {
+            if(ste->location == IN_SWAP) {
+              if(ste->from_file) {
+                /* write to file */
+                void * kpage = palloc_get_page(0);
+                vm_swap_in(kpage, ste->index);
+                acquire_lock_filesys();
+                file_write_at(ste->file, kpage,PGSIZE, ste->offset);
+                release_lock_filesys();
+
+                palloc_free_page(kpage);
+              }
+              vm_swap_free(ste->index);
+            }
+        }
       }
+
+      palloc_free_page (pt);
+    }
+  }
   palloc_free_page (pd);
 }
 
